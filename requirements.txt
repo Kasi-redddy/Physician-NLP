@@ -1,5 +1,4 @@
-text
 streamlit
 spacy
-transformers
 torch
+transformers
