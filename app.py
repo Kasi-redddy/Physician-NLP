@@ -2,6 +2,9 @@ import streamlit as st
 import re
 import spacy
 from transformers import pipeline
+import os
+os.system("python -m spacy download en_core_web_sm")
+
 
 st.set_page_config(page_title="Physician Notetaker", layout="wide")
 
