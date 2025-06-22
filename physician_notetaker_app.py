@@ -1,3 +1,5 @@
+import os
+os.environ["STREAMLIT_HOME"] = "/tmp/.streamlit"
 import streamlit as st
 import re
 import spacy
