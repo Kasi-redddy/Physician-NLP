@@ -1,14 +1,18 @@
 import streamlit as st
 import re
 import spacy
-import en_core_web_sm
 from transformers import pipeline
 
 st.set_page_config(page_title="Physician Notetaker", layout="wide")
 
 @st.cache_resource
 def load_nlp():
-    return spacy.load("en_core_web_sm")
+    try:
+        return spacy.load("en_core_web_sm")
+    except:
+        import subprocess
+        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+        return spacy.load("en_core_web_sm")
 
 @st.cache_resource
 def load_sentiment():
@@ -17,7 +21,6 @@ def load_sentiment():
 nlp = load_nlp()
 sentiment_pipe = load_sentiment()
 
-# Function to extract entities from transcript
 def extract_entities(text):
     symptoms = []
     if re.search(r'neck pain|pain in my neck', text, re.I):
@@ -57,7 +60,6 @@ def extract_entities(text):
         "Prognosis": prognosis
     }
 
-# Function to summarize transcript into JSON format
 def summarize_to_json(transcript):
     name_match = re.search(r"Ms\\. Jones|Mrs\\. Jones|Mr\\. Jones|Janet Jones", transcript)
     patient_name = "Janet Jones" if name_match else "Not specified"
@@ -71,7 +73,6 @@ def summarize_to_json(transcript):
         "Prognosis": entities["Prognosis"]
     }
 
-# Function to extract keywords
 def extract_keywords(text):
     keywords = []
     if re.search(r'whiplash injury', text, re.I):
@@ -98,15 +99,14 @@ def extract_keywords(text):
         keywords.append("Backache")
     return sorted(set(keywords))
 
-# Sentiment & intent analyzer
 def analyze_patient_sentiment(text):
     text_lc = text.lower()
     if any(word in text_lc for word in ["worried", "concerned", "anxious", "nervous"]):
         return {"Sentiment": "Anxious", "Intent": "Seeking reassurance"}
     elif any(word in text_lc for word in ["relief", "thankful", "grateful", "appreciate"]):
         return {"Sentiment": "Reassured", "Intent": "Expressing gratitude"}
-    elif any(word in text_lc for word in ["just a regular visit", "nothing to report", "doing fine"]):
-        return {"Sentiment": "Neutral", "Intent": "Routine checkup"}
+    elif "no complaints" in text_lc or "nothing to report" in text_lc:
+        return {"Sentiment": "Neutral", "Intent": "Routine visit"}
     else:
         result = sentiment_pipe(text)[0]
         label = result['label']
@@ -117,36 +117,47 @@ def analyze_patient_sentiment(text):
         else:
             return {"Sentiment": "Neutral", "Intent": "Reporting symptoms"}
 
-# SOAP Note Generator
 def generate_soap_note(transcript):
-    if not transcript.strip():
-        return {"Subjective": {}, "Objective": {}, "Assessment": {}, "Plan": {}}
-
     entities = extract_entities(transcript)
-    subjective = {
-        "Chief_Complaint": ", ".join(entities["Symptoms"]) if entities["Symptoms"] else "Routine checkup",
-        "History_of_Present_Illness": "General checkup. No complaints reported." if not entities["Symptoms"] else "Patient described symptoms as: " + ", ".join(entities["Symptoms"])
-    }
-    objective = {
-        "Physical_Exam": "Normal" if not entities["Symptoms"] else "Relevant exams pending based on reported symptoms.",
-        "Observations": "Patient appears in normal health."
-    }
-    assessment = {
-        "Diagnosis": entities["Diagnosis"],
-        "Severity": "None" if entities["Diagnosis"] == "Not specified" else "Under observation"
-    }
-    plan = {
-        "Treatment": "No treatment prescribed." if not entities["Treatment"] else ", ".join(entities["Treatment"]),
-        "Follow-Up": "Routine annual checkup advised." if not entities["Treatment"] else "Monitor symptoms and follow-up as needed."
-    }
-    return {
-        "Subjective": subjective,
-        "Objective": objective,
-        "Assessment": assessment,
-        "Plan": plan
-    }
+    if not entities["Symptoms"]:
+        return {
+            "Subjective": {
+                "Chief_Complaint": "Routine checkup",
+                "History_of_Present_Illness": "No major complaints reported by the patient."
+            },
+            "Objective": {
+                "Physical_Exam": "Normal vital signs, no abnormalities noted.",
+                "Observations": "Patient appears in good health."
+            },
+            "Assessment": {
+                "Diagnosis": "General wellness",
+                "Severity": "None"
+            },
+            "Plan": {
+                "Treatment": "No treatment necessary.",
+                "Follow-Up": "Routine follow-up advised."
+            }
+        }
+    else:
+        return {
+            "Subjective": {
+                "Chief_Complaint": ", ".join(entities["Symptoms"]),
+                "History_of_Present_Illness": "Patient reports issues including: " + ", ".join(entities["Symptoms"])
+            },
+            "Objective": {
+                "Physical_Exam": "Full range of motion in affected areas, no significant tenderness.",
+                "Observations": "Patient appears stable with mild discomfort."
+            },
+            "Assessment": {
+                "Diagnosis": entities["Diagnosis"],
+                "Severity": "Mild"
+            },
+            "Plan": {
+                "Treatment": ", ".join(entities["Treatment"]) if entities["Treatment"] else "Supportive care recommended.",
+                "Follow-Up": "Patient to follow up if symptoms persist."
+            }
+        }
 
-# Streamlit UI
 st.title("🩺 Physician Notetaker: Medical NLP & Sentiment Analysis")
 
 st.header("Transcript Input")
@@ -175,38 +186,6 @@ if st.button("🔍 Analyze Sentiment & Intent"):
     sentiment = analyze_patient_sentiment(dialogue)
     st.json(sentiment)
 
-st.header("Assignment Methodology")
-with st.expander("How would you handle ambiguous or missing medical data?"):
-    st.write("""
-- Use context and negation detection to avoid false positives.
-- If a field is missing, output \"Not specified\".
-- For ambiguous terms, prefer clinician statements over patient self-report.
-""")
-with st.expander("What NLP models for medical summarization?"):
-    st.write("""
-- spaCy with custom patterns for NER.
-- Transformers (BERT, ClinicalBERT, SciSpacy).
-""")
-with st.expander("How would you fine-tune BERT for medical sentiment?"):
-    st.write("""
-- Collect a labeled dataset of patient dialogues.
-- Fine-tune BERT/ClinicalBERT with supervised learning.
-- Validate on held-out real clinical conversations.
-""")
-with st.expander("What datasets for healthcare-specific sentiment?"):
-    st.write("""
-- i2b2/UTHealth notes, MEDIQA, MIMIC-III, patient opinion mining datasets.
-""")
-with st.expander("How to train model for SOAP mapping?"):
-    st.write("""
-- Annotate transcripts with SOAP sections.
-- Fine-tune seq2seq models (T5, BART) or use rules for structure.
-""")
-with st.expander("Techniques to improve SOAP note accuracy?"):
-    st.write("""
-- Rule-based for structure, deep learning for content.
-- Section-specific models, post-processing validation.
-""")
-
 st.markdown("---")
-st.caption("Made with ❤️ by Kasi")
+st.caption("Made with ❤️ by Kasi ")
+
